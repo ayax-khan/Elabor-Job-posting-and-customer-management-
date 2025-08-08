@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "1062359938217",
+    "firebase_url": "https://e-labor-3ed98-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "e-labor-3ed98",
+    "storage_bucket": "e-labor-3ed98.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1062359938217:android:3e2754af00c21b1e1125b8",
+        "android_client_info": {
+          "package_name": "com.example.elabor"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1062359938217-nqdqmrs7e24kbnf1gi9ibqom62dhuu2c.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.elabor",
+            "certificate_hash": "666d88fa890bd94c48298abf9363d2f8aedc5413"
+          }
+        },
+        {
+          "client_id": "1062359938217-jhn6u2pqpmjv1rte7obtcdkl8bs1uk8a.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC4f8jORnC1kVT9oH9lVcBNN-lrDLVjCSI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1062359938217-jhn6u2pqpmjv1rte7obtcdkl8bs1uk8a.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1062359938217-sqq670a7vvet17s6bm4dqbai3vkq66ur.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.elabor"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
