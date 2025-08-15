@@ -5,6 +5,7 @@ import 'package:elabor/widgets/custom_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:animate_do/animate_do.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class CommentDialog extends StatefulWidget {
   final Job job;
@@ -23,6 +24,67 @@ class CommentDialog extends StatefulWidget {
 class _CommentDialogState extends State<CommentDialog> {
   final TextEditingController _commentController = TextEditingController();
   final FirestoreService _firestoreService = FirestoreService();
+  String? _currentLaborId;
+  int _laborCommentCount = 0;
+  String? _commentErrorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentLaborId = FirebaseAuth.instance.currentUser?.uid;
+    _fetchLaborCommentCount();
+  }
+
+  Future<void> _fetchLaborCommentCount() async {
+    if (_currentLaborId == null) return;
+    try {
+      final count = await _firestoreService.getLaborCommentCountForJob(
+        widget.job.id,
+        _currentLaborId!,
+      );
+      setState(() {
+        _laborCommentCount = count;
+      });
+    } catch (e) {
+      // Handle error, e.g., show a snackbar
+      print('Error fetching comment count: $e');
+    }
+  }
+
+  Future<void> _addComment() async {
+    if (_commentController.text.isEmpty) {
+      setState(() {
+        _commentErrorMessage = 'Comment cannot be empty';
+      });
+      return;
+    }
+
+    if (_laborCommentCount >= 2) {
+      setState(() {
+        _commentErrorMessage = 'You\'ve already posted 2 comments.';
+      });
+      return;
+    }
+
+    try {
+      final laborName =
+          (await _firestoreService.getLaborData())?.fullName ?? 'Unknown Labor';
+      await widget.onAddComment(widget.job.id, _commentController.text);
+      _commentController.clear();
+      await _fetchLaborCommentCount(); // Refresh count after adding comment
+
+      if (_laborCommentCount + 1 >= 2) {
+        // Check if this comment makes it 2
+        if (mounted) {
+          Navigator.pop(context); // Close dialog after second comment
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _commentErrorMessage = 'Error adding comment: $e';
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -33,13 +95,15 @@ class _CommentDialogState extends State<CommentDialog> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
+    final bool canComment = _laborCommentCount < 2;
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       backgroundColor: Colors.transparent,
       child: FadeInUp(
         duration: const Duration(milliseconds: 300),
         child: Container(
-          width: size.width * 0.9, // Increased width
+          width: size.width * 0.9,
           height: size.height * 0.65,
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -220,37 +284,44 @@ class _CommentDialogState extends State<CommentDialog> {
                     ),
                   ],
                 ),
-                child: Row(
+                child: Column(
                   children: [
-                    Expanded(
-                      child: CustomTextField(
-                        controller: _commentController,
-                        label: 'Write a comment...',
-                        maxLines: 2,
-                        validator:
-                            (value) =>
-                                value?.isEmpty ?? true
-                                    ? 'Comment cannot be empty'
-                                    : null,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: CustomTextField(
+                            controller: _commentController,
+                            label: 'Write a comment...',
+                            maxLines: 2,
+                            validator:
+                                (value) =>
+                                    null, // Validation handled by _addComment
+                            enabled: canComment,
+                          ),
+                        ),
+                        SizedBox(width: size.width * 0.02),
+                        AnimatedButton(
+                          text: '',
+                          icon: Icons.send,
+                          color: canComment ? Colors.blueAccent : Colors.grey,
+                          onPressed: () => _addComment(),
+                          disabled: !canComment,
+                          width: size.width * 0.12,
+                          height: size.height * 0.06,
+                        ),
+                      ],
+                    ),
+                    if (_commentErrorMessage != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          _commentErrorMessage!,
+                          style: GoogleFonts.poppins(
+                            color: Colors.red,
+                            fontSize: size.width * 0.035,
+                          ),
+                        ),
                       ),
-                    ),
-                    SizedBox(width: size.width * 0.02),
-                    AnimatedButton(
-                      text: '',
-                      icon: Icons.send,
-                      color: Colors.blueAccent,
-                      onPressed: () {
-                        if (_commentController.text.isNotEmpty) {
-                          widget.onAddComment(
-                            widget.job.id,
-                            _commentController.text,
-                          );
-                          _commentController.clear();
-                        }
-                      },
-                      width: size.width * 0.12,
-                      height: size.height * 0.06,
-                    ),
                   ],
                 ),
               ),

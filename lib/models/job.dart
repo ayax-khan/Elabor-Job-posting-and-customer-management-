@@ -10,6 +10,8 @@ class Job {
   final String? imageUrl;
   final String postedBy;
   final DateTime createdAt;
+  final String? hiredLaborId;
+  final String? status;
 
   Job({
     required this.id,
@@ -21,6 +23,8 @@ class Job {
     this.imageUrl,
     required this.postedBy,
     required this.createdAt,
+    this.hiredLaborId,
+    this.status,
   });
 
   factory Job.fromFirestore(DocumentSnapshot doc) {
@@ -35,6 +39,10 @@ class Job {
       imageUrl: data['imageUrl'],
       postedBy: data['postedBy'] ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      hiredLaborId: data['hiredLaborId'],
+      status: data['status'],
     );
   }
+
+  bool get isHired => hiredLaborId != null;
 }

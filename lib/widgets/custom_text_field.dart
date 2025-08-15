@@ -11,6 +11,7 @@ class CustomTextField extends StatefulWidget {
   final void Function(String)? onChanged;
   final int? maxLines;
   final List<TextInputFormatter>? inputFormatters; // Add inputFormatters
+  final bool enabled; // Add enabled property
 
   const CustomTextField({
     super.key,
@@ -22,6 +23,7 @@ class CustomTextField extends StatefulWidget {
     this.onChanged,
     this.maxLines,
     this.inputFormatters,
+    this.enabled = true, // Default to true
   });
 
   @override
@@ -72,6 +74,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
         focusNode: _focusNode,
         onChanged: widget.onChanged,
         inputFormatters: widget.inputFormatters, // Apply input formatters
+        enabled: widget.enabled, // Use the enabled property
         style: GoogleFonts.poppins(fontSize: size.width * 0.04),
         decoration: InputDecoration(
           labelText: widget.label,

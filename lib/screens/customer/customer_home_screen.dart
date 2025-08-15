@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../models/labor.dart';
 import '../../widgets/custom_text_field.dart';
 import '../../widgets/city_area_dropdown.dart';
+import 'labor_profile_screen.dart';
 
 class CustomerHomeScreen extends StatefulWidget {
   const CustomerHomeScreen({super.key});
@@ -105,7 +106,14 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                               style: GoogleFonts.poppins(),
                             ),
                             onTap: () {
-                              // Navigate to labor profile or chat
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => LaborProfileScreen(
+                                    labor: labor,
+                                  ),
+                                ),
+                              );
                             },
                           ),
                         );

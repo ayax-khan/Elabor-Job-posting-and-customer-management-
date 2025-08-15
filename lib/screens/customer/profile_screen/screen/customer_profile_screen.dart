@@ -1,5 +1,5 @@
-import 'package:elabor/screens/customer/profle%20screen/widget/posts_section.dart';
-import 'package:elabor/screens/customer/profle%20screen/widget/profile_header.dart';
+import 'package:elabor/screens/customer/profile_screen/widget/enhanced_posts_section.dart';
+import 'package:elabor/screens/customer/profile_screen/widget/profile_header.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../service/firestore_service.dart';
@@ -56,7 +56,10 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                     children: [
                       ProfileHeader(customer: _customer),
                       SizedBox(height: size.height * 0.04),
-                      PostsSection(posts: _posts),
+                      EnhancedPostsSection(
+                        posts: _posts,
+                        onPostDeleted: _fetchData,
+                      ),
                     ],
                   ),
                 ),

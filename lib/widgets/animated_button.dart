@@ -8,6 +8,7 @@ class AnimatedButton extends StatefulWidget {
   final VoidCallback onPressed;
   final double? width;
   final double? height;
+  final bool disabled;
 
   const AnimatedButton({
     super.key,
@@ -17,6 +18,7 @@ class AnimatedButton extends StatefulWidget {
     required this.onPressed,
     this.width,
     this.height,
+    this.disabled = false,
   });
 
   @override
@@ -47,7 +49,7 @@ class _AnimatedButtonState extends State<AnimatedButton> {
           horizontal: size.width * 0.04,
         ),
         decoration: BoxDecoration(
-          color: widget.color,
+          color: widget.disabled ? Colors.grey : widget.color,
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(

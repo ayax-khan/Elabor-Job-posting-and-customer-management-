@@ -240,6 +240,40 @@ class FirestoreService {
     }
   }
 
+  // Delete a job post
+  Future<void> deleteJobPost(String jobId, String customerUid) async {
+    try {
+      // Delete from main jobs collection
+      await _firestore.collection('jobs').doc(jobId).delete();
+
+      // Delete from customer's posts subcollection
+      await _firestore
+          .collection('users')
+          .doc(customerUid)
+          .collection('customerProfile')
+          .doc('data')
+          .collection('posts')
+          .doc(jobId)
+          .delete();
+
+      // Delete all comments for this job
+      final commentsSnapshot =
+          await _firestore
+              .collection('jobs')
+              .doc(jobId)
+              .collection('comments')
+              .get();
+
+      final batch = _firestore.batch();
+      for (var doc in commentsSnapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    } catch (e) {
+      throw Exception('Failed to delete job post: $e');
+    }
+  }
+
   // Add a comment to a job post
   Future<void> addComment(
     String jobId,
@@ -248,6 +282,25 @@ class FirestoreService {
     String laborName,
   ) async {
     try {
+      // Check if job is already hired
+      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
+      if (jobDoc.exists && jobDoc.data()?['hiredLaborId'] != null) {
+        throw Exception('This job has already been filled');
+      }
+
+      // Check comment count for this labor on this post
+      final existingComments =
+          await _firestore
+              .collection('jobs')
+              .doc(jobId)
+              .collection('comments')
+              .where('laborId', isEqualTo: laborId)
+              .get();
+
+      if (existingComments.docs.length >= 2) {
+        throw Exception('You can only comment twice on each post');
+      }
+
       final commentData = {
         'laborId': laborId,
         'laborName': laborName,
@@ -263,7 +316,6 @@ class FirestoreService {
           .add(commentData);
 
       // Store in customer's postedJobs collection (if exists)
-      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
       final customerUid = jobDoc.data()?['postedBy'] as String?;
       if (customerUid != null) {
         await _firestore
@@ -273,9 +325,128 @@ class FirestoreService {
             .doc(jobId)
             .collection('comments')
             .add(commentData);
+
+        // Create notification for new comment
+        final jobTitle = jobDoc.data()?['title'] ?? 'your job post';
+        await createNotification(
+          recipientId: customerUid,
+          senderId: laborId,
+          type: 'newComment',
+          title: 'New Comment',
+          message:
+              '$laborName commented on $jobTitle: ${comment.length > 50 ? '${comment.substring(0, 50)}...' : comment}',
+          relatedPostId: jobId,
+          additionalData: {'jobTitle': jobTitle, 'laborName': laborName},
+        );
       }
     } catch (e) {
       throw Exception('Failed to add comment: $e');
+    }
+  }
+
+  // Hire a labor for a job post
+  Future<void> hireLaborForJob(
+    String jobId,
+    String laborId,
+    String laborName,
+  ) async {
+    try {
+      final jobRef = _firestore.collection('jobs').doc(jobId);
+
+      await _firestore.runTransaction((transaction) async {
+        final jobDoc = await transaction.get(jobRef);
+
+        if (!jobDoc.exists) {
+          throw Exception('Job not found');
+        }
+
+        final jobData = jobDoc.data()!;
+        if (jobData['hiredLaborId'] != null) {
+          throw Exception('This job has already been filled');
+        }
+
+        // Update job with hired labor
+        transaction.update(jobRef, {
+          'hiredLaborId': laborId,
+          'hiredLaborName': laborName,
+          'status': 'hired',
+          'hiredAt': FieldValue.serverTimestamp(),
+        });
+
+        // Also update in customer's posted jobs collection
+        final customerUid = jobData['postedBy'] as String?;
+        if (customerUid != null) {
+          final customerJobRef = _firestore
+              .collection('users')
+              .doc(customerUid)
+              .collection('customerProfile')
+              .doc('data')
+              .collection('posts')
+              .doc(jobId);
+
+          transaction.update(customerJobRef, {
+            'hiredLaborId': laborId,
+            'hiredLaborName': laborName,
+            'status': 'hired',
+            'hiredAt': FieldValue.serverTimestamp(),
+          });
+        }
+      });
+
+      // Create notification for labor being hired
+      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
+      final jobTitle = jobDoc.data()?['title'] ?? 'a job';
+
+      await createNotification(
+        recipientId: laborId,
+        senderId: jobDoc.data()?['postedBy'] ?? '',
+        type: 'laborHired',
+        title: 'Congratulations! You\'ve been hired',
+        message: 'You have been hired for the job: $jobTitle',
+        relatedPostId: jobId,
+        additionalData: {'jobTitle': jobTitle, 'jobId': jobId},
+      );
+    } catch (e) {
+      throw Exception('Failed to hire labor: $e');
+    }
+  }
+
+  // Get labor comment count for a specific job
+  Future<int> getLaborCommentCountForJob(String jobId, String laborId) async {
+    try {
+      final snapshot =
+          await _firestore
+              .collection("jobs")
+              .doc(jobId)
+              .collection("comments")
+              .where("laborId", isEqualTo: laborId)
+              .get();
+      return snapshot.docs.length;
+    } catch (e) {
+      print("Error getting labor comment count: $e");
+      return 0;
+    }
+  }
+
+  // Get labor details for comment display
+  Future<Map<String, dynamic>?> getLaborDetailsForComment(
+    String laborId,
+  ) async {
+    try {
+      final laborDoc = await _firestore.collection('labors').doc(laborId).get();
+      if (laborDoc.exists) {
+        final data = laborDoc.data()!;
+        return {
+          'uid': laborId,
+          'fullName': data['fullName'] ?? 'Unknown Labor',
+          'profilePhotoUrl': data['profilePhotoUrl'],
+          'skills': List<String>.from(data['skills'] ?? []),
+          'contactNumber': data['contactNumber'] ?? '',
+        };
+      }
+      return null;
+    } catch (e) {
+      throw Exception('Failed to get labor details: $e');
     }
   }
 
@@ -377,6 +548,34 @@ class FirestoreService {
     }
   }
 
+  // Get completed jobs for a labor (returns Map for profile display)
+  Future<List<Map<String, dynamic>>> getCompletedJobsForLabor(
+    String laborId,
+  ) async {
+    try {
+      final query =
+          await _firestore
+              .collection('jobs')
+              .where('assignedTo', isEqualTo: laborId)
+              .where('status', isEqualTo: 'completed')
+              .orderBy('createdAt', descending: true)
+              .get();
+
+      return query.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          'title': data['title'] ?? 'Untitled Job',
+          'description': data['description'] ?? 'No description available',
+          'completedAt': data['completedAt'],
+          'customerName': data['customerName'] ?? 'Unknown Customer',
+        };
+      }).toList();
+    } catch (e) {
+      throw Exception('Failed to fetch completed jobs for labor: $e');
+    }
+  }
+
   // Get available cities
   Future<List<String>> getCities() async {
     try {
@@ -398,6 +597,334 @@ class FirestoreService {
       return [];
     } catch (e) {
       throw Exception('Failed to fetch areas: $e');
+    }
+  }
+
+  // Chat-related methods
+
+  // Get or create a conversation between two users
+  Future<String> getOrCreateConversation(String userId1, String userId2) async {
+    try {
+      // Check if conversation already exists
+      final existingConversation =
+          await _firestore
+              .collection('conversations')
+              .where('participants', arrayContains: userId1)
+              .get();
+
+      for (var doc in existingConversation.docs) {
+        final participants = List<String>.from(doc.data()['participants']);
+        if (participants.contains(userId2)) {
+          return doc.id;
+        }
+      }
+
+      // Create new conversation
+      final conversationData = {
+        'participants': [userId1, userId2],
+        'lastMessage': '',
+        'lastMessageTimestamp': FieldValue.serverTimestamp(),
+        'lastMessageSenderId': '',
+        'unreadCounts': {userId1: 0, userId2: 0},
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+      final docRef = await _firestore
+          .collection('conversations')
+          .add(conversationData);
+      return docRef.id;
+    } catch (e) {
+      throw Exception('Failed to get or create conversation: $e');
+    }
+  }
+
+  // Send a message
+  Future<void> sendMessage(
+    String conversationId,
+    String senderId,
+    String receiverId,
+    String content,
+  ) async {
+    try {
+      final messageData = {
+        'senderId': senderId,
+        'receiverId': receiverId,
+        'content': content,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+      };
+
+      // Add message to conversation's messages subcollection
+      await _firestore
+          .collection('conversations')
+          .doc(conversationId)
+          .collection('messages')
+          .add(messageData);
+
+      // Update conversation's last message and unread count
+      final conversationRef = _firestore
+          .collection('conversations')
+          .doc(conversationId);
+      await _firestore.runTransaction((transaction) async {
+        final conversationDoc = await transaction.get(conversationRef);
+        final conversationData = conversationDoc.data() ?? {};
+
+        // Initialize unreadCounts if it doesn't exist or is empty
+        Map<String, int> currentUnreadCounts = {};
+        if (conversationData['unreadCounts'] != null &&
+            conversationData['unreadCounts'] is Map) {
+          currentUnreadCounts = Map<String, int>.from(
+            conversationData['unreadCounts'],
+          );
+        }
+
+        // Ensure both users have entries in unreadCounts
+        currentUnreadCounts[senderId] = currentUnreadCounts[senderId] ?? 0;
+        currentUnreadCounts[receiverId] = currentUnreadCounts[receiverId] ?? 0;
+
+        // Increment unread count for receiver
+        currentUnreadCounts[receiverId] = currentUnreadCounts[receiverId]! + 1;
+
+        transaction.update(conversationRef, {
+          'lastMessage': content,
+          'lastMessageTimestamp': FieldValue.serverTimestamp(),
+          'lastMessageSenderId': senderId,
+          'unreadCounts': currentUnreadCounts,
+        });
+      });
+
+      // Create notification for new message
+      final senderDetails = await getUserDetails(senderId);
+      final senderName = senderDetails?['name'] ?? 'Someone';
+
+      await createNotification(
+        recipientId: receiverId,
+        senderId: senderId,
+        type: 'newMessage',
+        title: 'New Message',
+        message:
+            '$senderName sent you a message: ${content.length > 50 ? '${content.substring(0, 50)}...' : content}',
+        relatedChatId: conversationId,
+      );
+    } catch (e) {
+      throw Exception('Failed to send message: $e');
+    }
+  }
+
+  // Get messages stream for a conversation
+  Stream<List<Map<String, dynamic>>> getMessagesStream(String conversationId) {
+    return _firestore
+        .collection('conversations')
+        .doc(conversationId)
+        .collection('messages')
+        .orderBy('timestamp', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) {
+                final data = doc.data();
+                data['id'] = doc.id;
+                return data;
+              }).toList(),
+        );
+  }
+
+  // Get conversations for a user
+  Stream<List<Map<String, dynamic>>> getConversationsStream(String userId) {
+    return _firestore
+        .collection('conversations')
+        .where('participants', arrayContains: userId)
+        .orderBy('lastMessageTimestamp', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) {
+                final data = doc.data();
+                data['id'] = doc.id;
+                return data;
+              }).toList(),
+        );
+  }
+
+  // Mark messages as read
+  Future<void> markMessagesAsRead(String conversationId, String userId) async {
+    try {
+      final conversationRef = _firestore
+          .collection('conversations')
+          .doc(conversationId);
+
+      await _firestore.runTransaction((transaction) async {
+        final conversationDoc = await transaction.get(conversationRef);
+        final currentUnreadCounts = Map<String, int>.from(
+          conversationDoc.data()?['unreadCounts'] ?? {},
+        );
+
+        // Reset unread count for this user
+        currentUnreadCounts[userId] = 0;
+
+        transaction.update(conversationRef, {
+          'unreadCounts': currentUnreadCounts,
+        });
+      });
+
+      // Mark individual messages as read
+      final messagesQuery =
+          await _firestore
+              .collection('conversations')
+              .doc(conversationId)
+              .collection('messages')
+              .where('receiverId', isEqualTo: userId)
+              .where('isRead', isEqualTo: false)
+              .get();
+
+      final batch = _firestore.batch();
+      for (var doc in messagesQuery.docs) {
+        batch.update(doc.reference, {'isRead': true});
+      }
+      await batch.commit();
+    } catch (e) {
+      throw Exception('Failed to mark messages as read: $e');
+    }
+  }
+
+  // Get user details (name and profile picture) for chat display
+  Future<Map<String, dynamic>?> getUserDetails(String userId) async {
+    try {
+      // Try to get labor data first
+      final laborDoc = await _firestore.collection('labors').doc(userId).get();
+      if (laborDoc.exists) {
+        final data = laborDoc.data()!;
+        return {
+          'name': data['fullName'] ?? 'Unknown User',
+          'profilePictureUrl': data['profilePhotoUrl'],
+          'type': 'labor',
+        };
+      }
+
+      // Try to get customer data
+      final customerDoc =
+          await _firestore
+              .collection('users')
+              .doc(userId)
+              .collection('customerProfile')
+              .doc('data')
+              .get();
+      if (customerDoc.exists) {
+        final data = customerDoc.data()!;
+        return {
+          'name': data['name'] ?? 'Unknown User',
+          'profilePictureUrl': data['profilePhotoUrl'],
+          'type': 'customer',
+        };
+      }
+
+      return null;
+    } catch (e) {
+      throw Exception('Failed to get user details: $e');
+    }
+  }
+
+  // Notification-related methods
+
+  // Create a notification
+  Future<void> createNotification({
+    required String recipientId,
+    required String senderId,
+    required String type,
+    required String title,
+    required String message,
+    String? relatedChatId,
+    String? relatedPostId,
+    Map<String, dynamic>? additionalData,
+  }) async {
+    try {
+      final notificationData = {
+        'recipientId': recipientId,
+        'senderId': senderId,
+        'type': type,
+        'title': title,
+        'message': message,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'relatedChatId': relatedChatId,
+        'relatedPostId': relatedPostId,
+        'additionalData': additionalData,
+      };
+
+      await _firestore.collection('notifications').add(notificationData);
+    } catch (e) {
+      throw Exception('Failed to create notification: $e');
+    }
+  }
+
+  // Get notifications for a user
+  Stream<List<Map<String, dynamic>>> getNotificationsStream(String userId) {
+    return _firestore
+        .collection('notifications')
+        .where('recipientId', isEqualTo: userId)
+        .orderBy('timestamp', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) {
+                final data = doc.data();
+                data['id'] = doc.id;
+                return data;
+              }).toList(),
+        );
+  }
+
+  // Mark notification as read
+  Future<void> markNotificationAsRead(String notificationId) async {
+    try {
+      await _firestore.collection('notifications').doc(notificationId).update({
+        'isRead': true,
+      });
+    } catch (e) {
+      throw Exception('Failed to mark notification as read: $e');
+    }
+  }
+
+  // Mark all notifications as read for a user
+  Future<void> markAllNotificationsAsRead(String userId) async {
+    try {
+      final notificationsQuery =
+          await _firestore
+              .collection('notifications')
+              .where('recipientId', isEqualTo: userId)
+              .where('isRead', isEqualTo: false)
+              .get();
+
+      final batch = _firestore.batch();
+      for (var doc in notificationsQuery.docs) {
+        batch.update(doc.reference, {'isRead': true});
+      }
+      await batch.commit();
+    } catch (e) {
+      throw Exception('Failed to mark all notifications as read: $e');
+    }
+  }
+
+  // Get unread notification count
+  Future<int> getUnreadNotificationCount(String userId) async {
+    try {
+      final unreadNotifications =
+          await _firestore
+              .collection('notifications')
+              .where('recipientId', isEqualTo: userId)
+              .where('isRead', isEqualTo: false)
+              .get();
+      return unreadNotifications.docs.length;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  Future<void> deleteNotification(String notificationId) async {
+    try {
+      await _firestore.collection('notifications').doc(notificationId).delete();
+    } catch (e) {
+      throw Exception('Failed to delete notification: $e');
     }
   }
 }
