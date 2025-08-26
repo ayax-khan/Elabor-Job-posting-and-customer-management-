@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../service/firestore_service.dart';
 import '../customer/chat_screen.dart';
+import 'job_management_screen.dart';
 
 class LaborNotificationScreen extends StatefulWidget {
   const LaborNotificationScreen({super.key});
@@ -120,7 +121,7 @@ class _LaborNotificationScreenState extends State<LaborNotificationScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'You\'ll see notifications here when you receive messages or get hired',
+                          'You\'ll see notifications here when you get hired or complete jobs',
                           style: GoogleFonts.poppins(
                             fontSize: 14,
                             color: Colors.grey.shade500,
@@ -141,7 +142,7 @@ class _LaborNotificationScreenState extends State<LaborNotificationScreen> {
                     final type = notification['type'] ?? '';
                     final title = notification['title'] ?? '';
                     final message = notification['message'] ?? '';
-                    final createdAt = notification['createdAt'];
+                    final timestamp = notification['timestamp'];
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -213,7 +214,7 @@ class _LaborNotificationScreenState extends State<LaborNotificationScreen> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              _formatTimestamp(createdAt),
+                              _formatTimestamp(timestamp),
                               style: GoogleFonts.poppins(
                                 fontSize: size.width * 0.03,
                                 color: Colors.grey.shade500,
@@ -228,26 +229,31 @@ class _LaborNotificationScreenState extends State<LaborNotificationScreen> {
                           }
 
                           // Handle notification tap based on type
-                          if (type == 'newMessage' && notification['relatedChatId'] != null) {
-                            // Navigate to chat
-                            final senderId = notification['senderId'];
-                            if (senderId != null) {
-                              final senderDetails = await _firestoreService.getUserDetails(senderId);
-                              if (mounted) {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => ChatScreen(
-                                      otherUserId: senderId,
-                                      otherUserName: senderDetails?['name'] ?? 'Unknown User',
-                                      otherUserProfilePicture: senderDetails?['profilePictureUrl'],
-                                    ),
-                                  ),
-                                );
-                              }
+                          if (type == 'laborHired' && notification['additionalData']?['jobId'] != null) {
+                            // Navigate to job management screen
+                            final jobId = notification['additionalData']['jobId'];
+                            if (mounted) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => JobManagementScreen(jobId: jobId),
+                                ),
+                              );
                             }
                           }
-                          // For laborHired notifications, just mark as read (already handled above)
+                          // For other job-related notifications, also navigate to job management
+                          else if ((type == 'jobConfirmed' || type == 'jobNotConfirmed') && 
+                                   notification['additionalData']?['jobId'] != null) {
+                            final jobId = notification['additionalData']['jobId'];
+                            if (mounted) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => JobManagementScreen(jobId: jobId),
+                                ),
+                              );
+                            }
+                          }
                         },
                       ),
                     );
@@ -260,12 +266,16 @@ class _LaborNotificationScreenState extends State<LaborNotificationScreen> {
 
   IconData _getNotificationIcon(String type) {
     switch (type) {
-      case 'newMessage':
-        return Icons.message;
       case 'laborHired':
         return Icons.work;
-      case 'newComment':
-        return Icons.comment;
+      case 'jobCompleted':
+        return Icons.check_circle;
+      case 'jobCancelled':
+        return Icons.cancel;
+      case 'jobConfirmed':
+        return Icons.verified;
+      case 'jobNotConfirmed':
+        return Icons.error;
       default:
         return Icons.notifications;
     }
@@ -273,11 +283,15 @@ class _LaborNotificationScreenState extends State<LaborNotificationScreen> {
 
   Color _getNotificationColor(String type) {
     switch (type) {
-      case 'newMessage':
-        return Colors.blue;
       case 'laborHired':
         return Colors.green;
-      case 'newComment':
+      case 'jobCompleted':
+        return Colors.blue;
+      case 'jobCancelled':
+        return Colors.red;
+      case 'jobConfirmed':
+        return Colors.green;
+      case 'jobNotConfirmed':
         return Colors.orange;
       default:
         return Colors.grey;

@@ -19,13 +19,24 @@ class Conversation {
 
   factory Conversation.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    final unreadCounts = Map<String, int>.from(data['unreadCounts'] ?? {});
+
+    // Ensure unreadCounts is valid
+    for (final participant in data['participants'] ?? []) {
+      if (!unreadCounts.containsKey(participant)) {
+        unreadCounts[participant] = 0;
+      }
+    }
+
     return Conversation(
       id: doc.id,
       participants: List<String>.from(data['participants'] ?? []),
       lastMessage: data['lastMessage'] ?? '',
-      lastMessageTimestamp: (data['lastMessageTimestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      lastMessageTimestamp:
+          (data['lastMessageTimestamp'] as Timestamp?)?.toDate() ??
+          DateTime.now(),
       lastMessageSenderId: data['lastMessageSenderId'] ?? '',
-      unreadCounts: Map<String, int>.from(data['unreadCounts'] ?? {}),
+      unreadCounts: unreadCounts,
     );
   }
 
@@ -50,4 +61,3 @@ class Conversation {
     );
   }
 }
-

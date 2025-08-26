@@ -646,22 +646,6 @@ class FirestoreService {
     String content,
   ) async {
     try {
-      final messageData = {
-        'senderId': senderId,
-        'receiverId': receiverId,
-        'content': content,
-        'timestamp': FieldValue.serverTimestamp(),
-        'isRead': false,
-      };
-
-      // Add message to conversation's messages subcollection
-      await _firestore
-          .collection('conversations')
-          .doc(conversationId)
-          .collection('messages')
-          .add(messageData);
-
-      // Update conversation's last message and unread count
       final conversationRef = _firestore
           .collection('conversations')
           .doc(conversationId);
@@ -692,20 +676,6 @@ class FirestoreService {
           'unreadCounts': currentUnreadCounts,
         });
       });
-
-      // Create notification for new message
-      final senderDetails = await getUserDetails(senderId);
-      final senderName = senderDetails?['name'] ?? 'Someone';
-
-      await createNotification(
-        recipientId: receiverId,
-        senderId: senderId,
-        type: 'newMessage',
-        title: 'New Message',
-        message:
-            '$senderName sent you a message: ${content.length > 50 ? '${content.substring(0, 50)}...' : content}',
-        relatedChatId: conversationId,
-      );
     } catch (e) {
       throw Exception('Failed to send message: $e');
     }
@@ -857,11 +827,12 @@ class FirestoreService {
     }
   }
 
-  // Get notifications for a user
+  // Get notifications for a user (excluding chat notifications)
   Stream<List<Map<String, dynamic>>> getNotificationsStream(String userId) {
     return _firestore
         .collection('notifications')
         .where('recipientId', isEqualTo: userId)
+        .where('type', whereNotIn: ['newMessage']) // Exclude chat notifications
         .orderBy('timestamp', descending: true)
         .snapshots()
         .map(
@@ -905,7 +876,7 @@ class FirestoreService {
     }
   }
 
-  // Get unread notification count
+  // Get unread notification count (excluding chat notifications)
   Future<int> getUnreadNotificationCount(String userId) async {
     try {
       final unreadNotifications =
@@ -913,6 +884,10 @@ class FirestoreService {
               .collection('notifications')
               .where('recipientId', isEqualTo: userId)
               .where('isRead', isEqualTo: false)
+              .where(
+                'type',
+                whereNotIn: ['newMessage'],
+              ) // Exclude chat notifications
               .get();
       return unreadNotifications.docs.length;
     } catch (e) {
@@ -925,6 +900,330 @@ class FirestoreService {
       await _firestore.collection('notifications').doc(notificationId).delete();
     } catch (e) {
       throw Exception('Failed to delete notification: $e');
+    }
+  }
+
+  // Job completion and cancellation methods
+
+  // Mark job as completed by labor
+  Future<void> markJobAsCompleted(String jobId, String laborId) async {
+    try {
+      final jobRef = _firestore.collection('jobs').doc(jobId);
+
+      await _firestore.runTransaction((transaction) async {
+        final jobDoc = await transaction.get(jobRef);
+
+        if (!jobDoc.exists) {
+          throw Exception('Job not found');
+        }
+
+        final jobData = jobDoc.data()!;
+        if (jobData['hiredLaborId'] != laborId) {
+          throw Exception('You are not hired for this job');
+        }
+
+        if (jobData['status'] == 'completed') {
+          throw Exception('Job is already completed');
+        }
+
+        // Update job status to pending completion
+        transaction.update(jobRef, {
+          'status': 'pending_completion',
+          'completedByLaborAt': FieldValue.serverTimestamp(),
+        });
+
+        // Also update in customer's posted jobs collection
+        final customerUid = jobData['postedBy'] as String?;
+        if (customerUid != null) {
+          final customerJobRef = _firestore
+              .collection('users')
+              .doc(customerUid)
+              .collection('customerProfile')
+              .doc('data')
+              .collection('posts')
+              .doc(jobId);
+
+          transaction.update(customerJobRef, {
+            'status': 'pending_completion',
+            'completedByLaborAt': FieldValue.serverTimestamp(),
+          });
+        }
+      });
+
+      // Create notification for customer about job completion
+      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
+      final jobTitle = jobDoc.data()?['title'] ?? 'a job';
+      final laborName = jobDoc.data()?['hiredLaborName'] ?? 'Labor';
+      final customerUid = jobDoc.data()?['postedBy'] ?? '';
+
+      await createNotification(
+        recipientId: customerUid,
+        senderId: laborId,
+        type: 'jobCompleted',
+        title: 'Job Completed',
+        message:
+            '$laborName has marked the job "$jobTitle" as completed. Please confirm if the work is satisfactory.',
+        relatedPostId: jobId,
+        additionalData: {
+          'jobTitle': jobTitle,
+          'laborName': laborName,
+          'jobId': jobId,
+          'requiresConfirmation': true,
+        },
+      );
+    } catch (e) {
+      throw Exception('Failed to mark job as completed: $e');
+    }
+  }
+
+  // Cancel job by labor
+  Future<void> cancelJob(String jobId, String laborId, String reason) async {
+    try {
+      final jobRef = _firestore.collection('jobs').doc(jobId);
+
+      await _firestore.runTransaction((transaction) async {
+        final jobDoc = await transaction.get(jobRef);
+
+        if (!jobDoc.exists) {
+          throw Exception('Job not found');
+        }
+
+        final jobData = jobDoc.data()!;
+        if (jobData['hiredLaborId'] != laborId) {
+          throw Exception('You are not hired for this job');
+        }
+
+        if (jobData['status'] == 'completed') {
+          throw Exception('Cannot cancel a completed job');
+        }
+
+        // Update job status back to available
+        transaction.update(jobRef, {
+          'hiredLaborId': FieldValue.delete(),
+          'hiredLaborName': FieldValue.delete(),
+          'status': 'available',
+          'cancelledAt': FieldValue.serverTimestamp(),
+          'cancellationReason': reason,
+        });
+
+        // Also update in customer's posted jobs collection
+        final customerUid = jobData['postedBy'] as String?;
+        if (customerUid != null) {
+          final customerJobRef = _firestore
+              .collection('users')
+              .doc(customerUid)
+              .collection('customerProfile')
+              .doc('data')
+              .collection('posts')
+              .doc(jobId);
+
+          transaction.update(customerJobRef, {
+            'hiredLaborId': FieldValue.delete(),
+            'hiredLaborName': FieldValue.delete(),
+            'status': 'available',
+            'cancelledAt': FieldValue.serverTimestamp(),
+            'cancellationReason': reason,
+          });
+        }
+      });
+
+      // Create notification for customer about job cancellation
+      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
+      final jobTitle = jobDoc.data()?['title'] ?? 'a job';
+      final laborName = jobDoc.data()?['hiredLaborName'] ?? 'Labor';
+      final customerUid = jobDoc.data()?['postedBy'] ?? '';
+
+      await createNotification(
+        recipientId: customerUid,
+        senderId: laborId,
+        type: 'jobCancelled',
+        title: 'Job Cancelled',
+        message:
+            '$laborName has cancelled the job "$jobTitle". Reason: $reason',
+        relatedPostId: jobId,
+        additionalData: {
+          'jobTitle': jobTitle,
+          'laborName': laborName,
+          'jobId': jobId,
+          'reason': reason,
+        },
+      );
+    } catch (e) {
+      throw Exception('Failed to cancel job: $e');
+    }
+  }
+
+  // Confirm job completion by customer
+  Future<void> confirmJobCompletion(
+    String jobId,
+    String customerUid,
+    bool isCompleted,
+  ) async {
+    try {
+      final jobRef = _firestore.collection('jobs').doc(jobId);
+
+      await _firestore.runTransaction((transaction) async {
+        final jobDoc = await transaction.get(jobRef);
+
+        if (!jobDoc.exists) {
+          throw Exception('Job not found');
+        }
+
+        final jobData = jobDoc.data()!;
+        if (jobData['postedBy'] != customerUid) {
+          throw Exception('You are not the owner of this job');
+        }
+
+        if (jobData['status'] != 'pending_completion') {
+          throw Exception('Job is not pending completion');
+        }
+
+        if (isCompleted) {
+          // Mark job as completed
+          transaction.update(jobRef, {
+            'status': 'completed',
+            'confirmedByCustomerAt': FieldValue.serverTimestamp(),
+          });
+
+          // Also update in customer's posted jobs collection
+          final customerJobRef = _firestore
+              .collection('users')
+              .doc(customerUid)
+              .collection('customerProfile')
+              .doc('data')
+              .collection('posts')
+              .doc(jobId);
+
+          transaction.update(customerJobRef, {
+            'status': 'completed',
+            'confirmedByCustomerAt': FieldValue.serverTimestamp(),
+          });
+
+          // Add to labor's completed jobs
+          final laborId = jobData['hiredLaborId'] as String;
+          final completedJobData = {
+            'jobId': jobId,
+            'title': jobData['title'],
+            'description': jobData['description'],
+            'customerName': jobData['customerName'] ?? 'Unknown Customer',
+            'completedAt': FieldValue.serverTimestamp(),
+            'customerUid': customerUid,
+          };
+
+          transaction.set(
+            _firestore
+                .collection('labors')
+                .doc(laborId)
+                .collection('completedJobs')
+                .doc(jobId),
+            completedJobData,
+          );
+        } else {
+          // Mark job as not completed, revert to hired status
+          transaction.update(jobRef, {
+            'status': 'hired',
+            'completedByLaborAt': FieldValue.delete(),
+          });
+
+          // Also update in customer's posted jobs collection
+          final customerJobRef = _firestore
+              .collection('users')
+              .doc(customerUid)
+              .collection('customerProfile')
+              .doc('data')
+              .collection('posts')
+              .doc(jobId);
+
+          transaction.update(customerJobRef, {
+            'status': 'hired',
+            'completedByLaborAt': FieldValue.delete(),
+          });
+        }
+      });
+
+      // Create notification for labor about customer's decision
+      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
+      final jobTitle = jobDoc.data()?['title'] ?? 'a job';
+      final laborId = jobDoc.data()?['hiredLaborId'] ?? '';
+
+      if (isCompleted) {
+        await createNotification(
+          recipientId: laborId,
+          senderId: customerUid,
+          type: 'jobConfirmed',
+          title: 'Job Confirmed as Completed',
+          message:
+              'Great work! The customer has confirmed that you completed the job "$jobTitle" successfully.',
+          relatedPostId: jobId,
+          additionalData: {'jobTitle': jobTitle, 'jobId': jobId},
+        );
+      } else {
+        await createNotification(
+          recipientId: laborId,
+          senderId: customerUid,
+          type: 'jobNotConfirmed',
+          title: 'Job Not Confirmed',
+          message:
+              'The customer has indicated that the job "$jobTitle" is not yet completed to their satisfaction.',
+          relatedPostId: jobId,
+          additionalData: {'jobTitle': jobTitle, 'jobId': jobId},
+        );
+      }
+    } catch (e) {
+      throw Exception('Failed to confirm job completion: $e');
+    }
+  }
+
+  // Get job details for labor
+  Future<Map<String, dynamic>?> getJobDetailsForLabor(String jobId) async {
+    try {
+      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
+      if (jobDoc.exists) {
+        final data = jobDoc.data()!;
+        return {
+          'id': jobId,
+          'title': data['title'] ?? 'Untitled Job',
+          'description': data['description'] ?? 'No description',
+          'address': data['address'] ?? '',
+          'city': data['city'] ?? '',
+          'area': data['area'] ?? '',
+          'status': data['status'] ?? 'available',
+          'hiredLaborId': data['hiredLaborId'],
+          'postedBy': data['postedBy'] ?? '',
+          'createdAt': data['createdAt'],
+        };
+      }
+      return null;
+    } catch (e) {
+      throw Exception('Failed to get job details: $e');
+    }
+  }
+
+  // Get completed jobs for labor profile display
+  Future<List<Map<String, dynamic>>> getCompletedJobsForLaborProfile(
+    String laborId,
+  ) async {
+    try {
+      final snapshot =
+          await _firestore
+              .collection('labors')
+              .doc(laborId)
+              .collection('completedJobs')
+              .orderBy('completedAt', descending: true)
+              .get();
+
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          'title': data['title'] ?? 'Untitled Job',
+          'description': data['description'] ?? 'No description available',
+          'customerName': data['customerName'] ?? 'Unknown Customer',
+          'completedAt': data['completedAt'],
+        };
+      }).toList();
+    } catch (e) {
+      throw Exception('Failed to fetch completed jobs for labor profile: $e');
     }
   }
 }

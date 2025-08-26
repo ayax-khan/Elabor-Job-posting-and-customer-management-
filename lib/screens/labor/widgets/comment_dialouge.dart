@@ -67,8 +67,6 @@ class _CommentDialogState extends State<CommentDialog> {
     }
 
     try {
-      final laborName =
-          (await _firestoreService.getLaborData())?.fullName ?? 'Unknown Labor';
       await widget.onAddComment(widget.job.id, _commentController.text);
       _commentController.clear();
       await _fetchLaborCommentCount(); // Refresh count after adding comment
@@ -103,7 +101,7 @@ class _CommentDialogState extends State<CommentDialog> {
       child: FadeInUp(
         duration: const Duration(milliseconds: 300),
         child: Container(
-          width: size.width * 0.9,
+          width: size.width * 0.95,
           height: size.height * 0.65,
           decoration: BoxDecoration(
             gradient: LinearGradient(

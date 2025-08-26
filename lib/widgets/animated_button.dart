@@ -61,19 +61,23 @@ class _AnimatedButtonState extends State<AnimatedButton> {
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             if (widget.icon != null)
               Icon(widget.icon, color: Colors.white, size: size.width * 0.05),
             if (widget.icon != null && widget.text.isNotEmpty)
               SizedBox(width: size.width * 0.02),
             if (widget.text.isNotEmpty)
-              Text(
-                widget.text,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
-                  fontSize: size.width * 0.045,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
+              Flexible(
+                child: Text(
+                  widget.text,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: size.width * 0.045,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
           ],

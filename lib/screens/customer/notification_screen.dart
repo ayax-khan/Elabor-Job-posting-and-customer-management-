@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../service/firestore_service.dart';
+import '../../widgets/job_completion_dialog.dart';
 import 'chat_screen.dart';
 
 class NotificationScreen extends StatefulWidget {
@@ -50,22 +51,20 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
       final type = notificationData['type'];
 
-      if (type == 'newMessage' && notificationData['relatedChatId'] != null) {
-        // Navigate to chat screen
-        final senderId = notificationData['senderId'];
-        final senderDetails = await _firestoreService.getUserDetails(senderId);
-
-        if (mounted && senderDetails != null) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder:
-                  (context) => ChatScreen(
-                    otherUserId: senderId,
-                    otherUserName: senderDetails['name'] ?? 'Unknown User',
-                    otherUserProfilePicture: senderDetails['profilePictureUrl'],
-                  ),
-            ),
+      if (type == 'jobCompleted' &&
+          notificationData['additionalData']?['requiresConfirmation'] == true) {
+        // Show job completion confirmation dialog
+        final additionalData = notificationData['additionalData'];
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder:
+                (context) => JobCompletionDialog(
+                  jobId: additionalData['jobId'] ?? '',
+                  jobTitle: additionalData['jobTitle'] ?? 'Unknown Job',
+                  laborName: additionalData['laborName'] ?? 'Unknown Labor',
+                  customerUid: _currentUserId ?? '',
+                ),
           );
         }
       } else if (type == 'newComment' || type == 'laborHired') {
@@ -77,7 +76,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
               content: Text(
                 type == 'newComment'
                     ? 'Navigate to job post to view comment'
-                    : 'Congratulations on being hired!',
+                    : 'Labor has been hired for your job!',
               ),
             ),
           );
@@ -259,6 +258,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
     if (_currentUserId == null) {
       return Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: false,
           backgroundColor: Colors.white,
           elevation: 0,
           title: Text(
