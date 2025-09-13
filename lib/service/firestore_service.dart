@@ -9,7 +9,7 @@ class FirestoreService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // Save user roles
-  Future<void> _addUserRole(String uid, String role) async {
+  Future<void> addUserRole(String uid, String role) async {
     try {
       final roleDoc = _firestore
           .collection('users')
@@ -105,7 +105,7 @@ class FirestoreService {
       };
 
       await _firestore.collection('labors').doc(uid).set(laborData);
-      await _addUserRole(uid, 'labor');
+      await addUserRole(uid, 'labor');
     } catch (e) {
       throw Exception('Failed to save labor data: $e');
     }
@@ -133,7 +133,7 @@ class FirestoreService {
             'email': _auth.currentUser?.email ?? '',
             'profilePhotoUrl': profilePhotoUrl,
           });
-      await _addUserRole(uid, 'customer');
+      await addUserRole(uid, 'customer');
     } catch (e) {
       throw Exception('Failed to save customer data: $e');
     }
@@ -326,18 +326,21 @@ class FirestoreService {
             .collection('comments')
             .add(commentData);
 
-        // Create notification for new comment
+        // Create notification for new comment, only for the customer
         final jobTitle = jobDoc.data()?['title'] ?? 'your job post';
-        await createNotification(
-          recipientId: customerUid,
-          senderId: laborId,
-          type: 'newComment',
-          title: 'New Comment',
-          message:
-              '$laborName commented on $jobTitle: ${comment.length > 50 ? '${comment.substring(0, 50)}...' : comment}',
-          relatedPostId: jobId,
-          additionalData: {'jobTitle': jobTitle, 'laborName': laborName},
-        );
+        if (customerUid != laborId) {
+          // Ensure customer is not the labor commenting
+          await createNotification(
+            recipientId: customerUid,
+            senderId: laborId,
+            type: 'newComment',
+            title: 'New Comment',
+            message:
+                '$laborName commented on $jobTitle: ${comment.length > 50 ? '${comment.substring(0, 50)}...' : comment}',
+            relatedPostId: jobId,
+            additionalData: {'jobTitle': jobTitle, 'laborName': laborName},
+          );
+        }
       }
     } catch (e) {
       throw Exception('Failed to add comment: $e');
@@ -393,18 +396,20 @@ class FirestoreService {
         }
       });
 
-      // Create notification for labor being hired
-      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
-      final jobTitle = jobDoc.data()?['title'] ?? 'a job';
+      // Create notification for labor being hired, only for the labor
+      final jobDoc = await _firestore.collection("jobs").doc(jobId).get();
+      final jobTitle = jobDoc.data()?["title"] ?? "a job";
+      final customerUid = jobDoc.data()?["postedBy"] ?? "";
 
       await createNotification(
         recipientId: laborId,
-        senderId: jobDoc.data()?['postedBy'] ?? '',
-        type: 'laborHired',
-        title: 'Congratulations! You\'ve been hired',
-        message: 'You have been hired for the job: $jobTitle',
+        senderId:
+            customerUid, // The customer is the sender of this notification
+        type: "laborHired",
+        title: "Congratulations! You\"ve been hired",
+        message: "You have been hired for the job: $jobTitle",
         relatedPostId: jobId,
-        additionalData: {'jobTitle': jobTitle, 'jobId': jobId},
+        additionalData: {"jobTitle": jobTitle, "jobId": jobId},
       );
     } catch (e) {
       throw Exception('Failed to hire labor: $e');
@@ -539,7 +544,7 @@ class FirestoreService {
       final query =
           await _firestore
               .collection('jobs')
-              .where('assignedTo', isEqualTo: laborId)
+              .where('hiredLaborId', isEqualTo: laborId)
               .where('status', isEqualTo: 'completed')
               .get();
       return query.docs.map((doc) => Job.fromFirestore(doc)).toList();
@@ -556,7 +561,7 @@ class FirestoreService {
       final query =
           await _firestore
               .collection('jobs')
-              .where('assignedTo', isEqualTo: laborId)
+              .where('hiredLaborId', isEqualTo: laborId)
               .where('status', isEqualTo: 'completed')
               .orderBy('createdAt', descending: true)
               .get();
@@ -605,18 +610,28 @@ class FirestoreService {
   // Get or create a conversation between two users
   Future<String> getOrCreateConversation(String userId1, String userId2) async {
     try {
-      // Check if conversation already exists
-      final existingConversation =
+      // Check if conversation already exists with participants in order (userId1, userId2)
+      final conversationQuery =
           await _firestore
               .collection('conversations')
-              .where('participants', arrayContains: userId1)
+              .where('participants', isEqualTo: [userId1, userId2])
+              .limit(1)
               .get();
 
-      for (var doc in existingConversation.docs) {
-        final participants = List<String>.from(doc.data()['participants']);
-        if (participants.contains(userId2)) {
-          return doc.id;
-        }
+      if (conversationQuery.docs.isNotEmpty) {
+        return conversationQuery.docs.first.id;
+      }
+
+      // Check for conversation with reversed participants (userId2, userId1)
+      final reversedConversationQuery =
+          await _firestore
+              .collection('conversations')
+              .where('participants', isEqualTo: [userId2, userId1])
+              .limit(1)
+              .get();
+
+      if (reversedConversationQuery.docs.isNotEmpty) {
+        return reversedConversationQuery.docs.first.id;
       }
 
       // Create new conversation
@@ -675,7 +690,31 @@ class FirestoreService {
           'lastMessageSenderId': senderId,
           'unreadCounts': currentUnreadCounts,
         });
+
+        // Add message to subcollection
+        transaction.set(conversationRef.collection('messages').doc(), {
+          'senderId': senderId,
+          'receiverId': receiverId,
+          'content': content,
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+        });
       });
+
+      // Create notification for the receiver
+      await createNotification(
+        recipientId: receiverId,
+        senderId: senderId,
+        type: 'newMessage',
+        title: 'New Message',
+        message: content,
+        relatedChatId: conversationId,
+        additionalData: {
+          'senderId': senderId,
+          'receiverId': receiverId,
+          'conversationId': conversationId,
+        },
+      );
     } catch (e) {
       throw Exception('Failed to send message: $e');
     }
@@ -767,6 +806,8 @@ class FirestoreService {
         return {
           'name': data['fullName'] ?? 'Unknown User',
           'profilePictureUrl': data['profilePhotoUrl'],
+          'contactNumber': data['contactNumber'],
+          'phoneNumber': data['contactNumber'],
           'type': 'labor',
         };
       }
@@ -784,6 +825,8 @@ class FirestoreService {
         return {
           'name': data['name'] ?? 'Unknown User',
           'profilePictureUrl': data['profilePhotoUrl'],
+          'contactNumber': data['phoneNumber'],
+          'phoneNumber': data['phoneNumber'],
           'type': 'customer',
         };
       }
@@ -832,7 +875,7 @@ class FirestoreService {
     return _firestore
         .collection('notifications')
         .where('recipientId', isEqualTo: userId)
-        .where('type', whereNotIn: ['newMessage']) // Exclude chat notifications
+        .where('type', whereNotIn: ['newMessage', 'chat'])
         .orderBy('timestamp', descending: true)
         .snapshots()
         .map(
@@ -884,10 +927,7 @@ class FirestoreService {
               .collection('notifications')
               .where('recipientId', isEqualTo: userId)
               .where('isRead', isEqualTo: false)
-              .where(
-                'type',
-                whereNotIn: ['newMessage'],
-              ) // Exclude chat notifications
+              .where('type', whereNotIn: ['newMessage', 'chat'])
               .get();
       return unreadNotifications.docs.length;
     } catch (e) {
@@ -956,21 +996,24 @@ class FirestoreService {
       final laborName = jobDoc.data()?['hiredLaborName'] ?? 'Labor';
       final customerUid = jobDoc.data()?['postedBy'] ?? '';
 
-      await createNotification(
-        recipientId: customerUid,
-        senderId: laborId,
-        type: 'jobCompleted',
-        title: 'Job Completed',
-        message:
-            '$laborName has marked the job "$jobTitle" as completed. Please confirm if the work is satisfactory.',
-        relatedPostId: jobId,
-        additionalData: {
-          'jobTitle': jobTitle,
-          'laborName': laborName,
-          'jobId': jobId,
-          'requiresConfirmation': true,
-        },
-      );
+      // Create notification for customer about job completion, only if customer is not the labor
+      if (customerUid != laborId) {
+        await createNotification(
+          recipientId: customerUid,
+          senderId: laborId,
+          type: 'jobCompleted',
+          title: 'Job Completed',
+          message:
+              '$laborName has marked the job "$jobTitle" as completed. Please confirm if the work is satisfactory.',
+          relatedPostId: jobId,
+          additionalData: {
+            'jobTitle': jobTitle,
+            'laborName': laborName,
+            'jobId': jobId,
+            'requiresConfirmation': true,
+          },
+        );
+      }
     } catch (e) {
       throw Exception('Failed to mark job as completed: $e');
     }
@@ -1053,6 +1096,30 @@ class FirestoreService {
     }
   }
 
+  Future<Map<String, dynamic>?> getJobDetailsForLabor(String jobId) async {
+    try {
+      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
+      if (jobDoc.exists) {
+        final data = jobDoc.data()!;
+        return {
+          'id': jobId,
+          'title': data['title'] ?? 'Untitled Job',
+          'description': data['description'] ?? 'No description',
+          'address': data['address'] ?? '',
+          'city': data['city'] ?? '',
+          'area': data['area'] ?? '',
+          'status': data['status'] ?? 'available',
+          'hiredLaborId': data['hiredLaborId'],
+          'postedBy': data['postedBy'] ?? '',
+          'createdAt': data['createdAt'],
+        };
+      }
+      return null;
+    } catch (e) {
+      throw Exception('Failed to get job details: $e');
+    }
+  }
+
   // Confirm job completion by customer
   Future<void> confirmJobCompletion(
     String jobId,
@@ -1099,27 +1166,23 @@ class FirestoreService {
             'confirmedByCustomerAt': FieldValue.serverTimestamp(),
           });
 
-          // Add to labor's completed jobs
-          final laborId = jobData['hiredLaborId'] as String;
-          final completedJobData = {
-            'jobId': jobId,
-            'title': jobData['title'],
-            'description': jobData['description'],
-            'customerName': jobData['customerName'] ?? 'Unknown Customer',
-            'completedAt': FieldValue.serverTimestamp(),
-            'customerUid': customerUid,
-          };
-
-          transaction.set(
-            _firestore
-                .collection('labors')
-                .doc(laborId)
-                .collection('completedJobs')
-                .doc(jobId),
-            completedJobData,
-          );
+          // Create notification for labor about job completion confirmation
+          final laborId = jobData['hiredLaborId'] as String?;
+          final jobTitle = jobData['title'] ?? 'a job';
+          if (laborId != null) {
+            await createNotification(
+              recipientId: laborId,
+              senderId: customerUid,
+              type: 'jobConfirmed',
+              title: 'Job Confirmed',
+              message:
+                  'The customer has confirmed the completion of "$jobTitle".',
+              relatedPostId: jobId,
+              additionalData: {'jobTitle': jobTitle, 'jobId': jobId},
+            );
+          }
         } else {
-          // Mark job as not completed, revert to hired status
+          // Mark job as pending (customer rejected completion)
           transaction.update(jobRef, {
             'status': 'hired',
             'completedByLaborAt': FieldValue.delete(),
@@ -1138,92 +1201,251 @@ class FirestoreService {
             'status': 'hired',
             'completedByLaborAt': FieldValue.delete(),
           });
+
+          // Create notification for labor about job completion rejection
+          final laborId = jobData['hiredLaborId'] as String?;
+          final jobTitle = jobData['title'] ?? 'a job';
+          if (laborId != null) {
+            await createNotification(
+              recipientId: laborId,
+              senderId: customerUid,
+              type: 'jobRejected',
+              title: 'Job Completion Rejected',
+              message:
+                  'The customer has rejected the completion of "$jobTitle". Please contact the customer for more details.',
+              relatedPostId: jobId,
+              additionalData: {'jobTitle': jobTitle, 'jobId': jobId},
+            );
+          }
         }
       });
-
-      // Create notification for labor about customer's decision
-      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
-      final jobTitle = jobDoc.data()?['title'] ?? 'a job';
-      final laborId = jobDoc.data()?['hiredLaborId'] ?? '';
-
-      if (isCompleted) {
-        await createNotification(
-          recipientId: laborId,
-          senderId: customerUid,
-          type: 'jobConfirmed',
-          title: 'Job Confirmed as Completed',
-          message:
-              'Great work! The customer has confirmed that you completed the job "$jobTitle" successfully.',
-          relatedPostId: jobId,
-          additionalData: {'jobTitle': jobTitle, 'jobId': jobId},
-        );
-      } else {
-        await createNotification(
-          recipientId: laborId,
-          senderId: customerUid,
-          type: 'jobNotConfirmed',
-          title: 'Job Not Confirmed',
-          message:
-              'The customer has indicated that the job "$jobTitle" is not yet completed to their satisfaction.',
-          relatedPostId: jobId,
-          additionalData: {'jobTitle': jobTitle, 'jobId': jobId},
-        );
-      }
     } catch (e) {
       throw Exception('Failed to confirm job completion: $e');
     }
   }
 
-  // Get job details for labor
-  Future<Map<String, dynamic>?> getJobDetailsForLabor(String jobId) async {
+  // Get labor's current hired job
+  Future<Job?> getLaborCurrentHiredJob(String laborId) async {
     try {
-      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
-      if (jobDoc.exists) {
-        final data = jobDoc.data()!;
-        return {
-          'id': jobId,
-          'title': data['title'] ?? 'Untitled Job',
-          'description': data['description'] ?? 'No description',
-          'address': data['address'] ?? '',
-          'city': data['city'] ?? '',
-          'area': data['area'] ?? '',
-          'status': data['status'] ?? 'available',
-          'hiredLaborId': data['hiredLaborId'],
-          'postedBy': data['postedBy'] ?? '',
-          'createdAt': data['createdAt'],
-        };
+      final querySnapshot =
+          await _firestore
+              .collection('jobs')
+              .where('hiredLaborId', isEqualTo: laborId)
+              .where('status', whereIn: ['hired', 'pending_completion'])
+              .limit(1)
+              .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        return Job.fromFirestore(querySnapshot.docs.first);
       }
       return null;
     } catch (e) {
-      throw Exception('Failed to get job details: $e');
+      throw Exception('Failed to get labor current hired job: $e');
     }
   }
 
-  // Get completed jobs for labor profile display
-  Future<List<Map<String, dynamic>>> getCompletedJobsForLaborProfile(
-    String laborId,
-  ) async {
+  // Get customer's current posted job
+  Future<Job?> getCustomerCurrentPostedJob(String customerId) async {
     try {
-      final snapshot =
+      final querySnapshot =
           await _firestore
-              .collection('labors')
-              .doc(laborId)
-              .collection('completedJobs')
-              .orderBy('completedAt', descending: true)
+              .collection('jobs')
+              .where('postedBy', isEqualTo: customerId)
+              .where('status', whereIn: ['hired', 'pending_completion'])
+              .limit(1)
               .get();
 
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'id': doc.id,
-          'title': data['title'] ?? 'Untitled Job',
-          'description': data['description'] ?? 'No description available',
-          'customerName': data['customerName'] ?? 'Unknown Customer',
-          'completedAt': data['completedAt'],
-        };
-      }).toList();
+      if (querySnapshot.docs.isNotEmpty) {
+        return Job.fromFirestore(querySnapshot.docs.first);
+      }
+      return null;
     } catch (e) {
-      throw Exception('Failed to fetch completed jobs for labor profile: $e');
+      throw Exception('Failed to get customer current posted job: $e');
+    }
+  }
+
+  // Get all jobs posted by a specific customer
+  Stream<List<Job>> getJobsPostedByCustomer(String customerId) {
+    return _firestore
+        .collection('jobs')
+        .where('postedBy', isEqualTo: customerId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) => Job.fromFirestore(doc)).toList(),
+        );
+  }
+
+  // Get all jobs a labor has commented on
+  Stream<List<Job>> getJobsLaborCommentedOn(String laborId) {
+    return _firestore
+        .collection('jobs')
+        .where(
+          'comments.laborId',
+          arrayContains: laborId,
+        ) // This query won't work directly as 'comments' is a subcollection
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) => Job.fromFirestore(doc)).toList(),
+        );
+  }
+
+  // Get all jobs a labor has been hired for
+  Stream<List<Job>> getJobsLaborHiredFor(String laborId) {
+    return _firestore
+        .collection('jobs')
+        .where('hiredLaborId', isEqualTo: laborId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) => Job.fromFirestore(doc)).toList(),
+        );
+  }
+
+  // Get a single job by ID
+  Future<Job?> getJobById(String jobId) async {
+    try {
+      final doc = await _firestore.collection('jobs').doc(jobId).get();
+      if (doc.exists) {
+        return Job.fromFirestore(doc);
+      }
+      return null;
+    } catch (e) {
+      throw Exception('Failed to get job by ID: $e');
+    }
+  }
+
+  // Update job status
+  Future<void> updateJobStatus(String jobId, String status) async {
+    try {
+      await _firestore.collection('jobs').doc(jobId).update({'status': status});
+    } catch (e) {
+      throw Exception('Failed to update job status: $e');
+    }
+  }
+
+  // Get all labors (for search/browse)
+  Stream<List<Labor>> getAllLabors() {
+    return _firestore
+        .collection('labors')
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) => Labor.fromFirestore(doc)).toList(),
+        );
+  }
+
+  // Get a single labor by ID
+  Future<Labor?> getLaborById(String laborId) async {
+    try {
+      final doc = await _firestore.collection('labors').doc(laborId).get();
+      if (doc.exists) {
+        return Labor.fromFirestore(doc);
+      }
+      return null;
+    } catch (e) {
+      throw Exception('Failed to get labor by ID: $e');
+    }
+  }
+
+  // Get a single customer by ID
+  Future<Customer?> getCustomerById(String customerId) async {
+    try {
+      final doc =
+          await _firestore
+              .collection('users')
+              .doc(customerId)
+              .collection('customerProfile')
+              .doc('data')
+              .get();
+      if (doc.exists) {
+        return Customer.fromFirestore(doc);
+      }
+      return null;
+    } catch (e) {
+      throw Exception('Failed to get customer by ID: $e');
+    }
+  }
+
+  // Get all customers (if needed, use with caution for large datasets)
+  Stream<List<Customer>> getAllCustomers() {
+    return _firestore
+        .collection('users')
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) => Customer.fromFirestore(doc)).toList(),
+        );
+  }
+
+  // Get labor's average rating (placeholder)
+  Future<double> getLaborAverageRating(String laborId) async {
+    // Implement actual rating calculation based on reviews/feedback
+    return 4.5; // Placeholder
+  }
+
+  // Get labor's total jobs completed (placeholder)
+  Future<int> getLaborTotalJobsCompleted(String laborId) async {
+    // Implement actual count based on completed jobs
+    return 10; // Placeholder
+  }
+
+  // Update labor profile
+  Future<void> updateLaborProfile(String uid, Map<String, dynamic> data) async {
+    try {
+      await _firestore.collection('labors').doc(uid).update(data);
+    } catch (e) {
+      throw Exception('Failed to update labor profile: $e');
+    }
+  }
+
+  // Update customer profile
+  Future<void> updateCustomerProfile(
+    String uid,
+    Map<String, dynamic> data,
+  ) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('customerProfile')
+          .doc('data')
+          .update(data);
+    } catch (e) {
+      throw Exception('Failed to update customer profile: $e');
+    }
+  }
+
+  // Delete user data (labor or customer)
+  Future<void> deleteUserData(String uid, String role) async {
+    try {
+      if (role == 'labor') {
+        await _firestore.collection('labors').doc(uid).delete();
+      } else if (role == 'customer') {
+        await _firestore
+            .collection('users')
+            .doc(uid)
+            .collection('customerProfile')
+            .doc('data')
+            .delete();
+      }
+      // Optionally remove the role from the user's roles document
+      final roleDoc = _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('roles')
+          .doc('data');
+      final doc = await roleDoc.get();
+      if (doc.exists && doc.data() != null && doc.data()!['roles'] != null) {
+        List<String> roles = List<String>.from(doc.data()!['roles']);
+        roles.remove(role);
+        await roleDoc.set({'roles': roles});
+      }
+    } catch (e) {
+      throw Exception('Failed to delete user data: $e');
     }
   }
 }

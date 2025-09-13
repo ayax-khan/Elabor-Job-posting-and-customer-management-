@@ -117,6 +117,7 @@ class _LaborProfessionalDetailsScreenState
                     'languages': languages,
                     'availability': _availability,
                     'wage': _wageController.text,
+                    'email': widget.basicInfo['email'],
                   },
                 ),
           ),

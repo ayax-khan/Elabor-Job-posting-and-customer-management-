@@ -6,7 +6,7 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirestoreService _firestoreService = FirestoreService();
 
-  // Sign in with email and password
+  // Register or add role to an existing user
   Future<User?> signInWithEmail(String email, String password) async {
     try {
       final result = await _auth.signInWithEmailAndPassword(
@@ -19,16 +19,54 @@ class AuthService {
     }
   }
 
-  // Sign up with email and password
-  Future<User?> signUpWithEmail(String email, String password) async {
+  Future<User?> registerUser(String email, String password, String role) async {
     try {
-      final result = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      return result.user;
+      User? user = _auth.currentUser;
+
+      if (user != null) {
+        // User is already signed in, try to link email/password if not already linked
+        try {
+          await user.linkWithCredential(
+            EmailAuthProvider.credential(email: email, password: password),
+          );
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'provider-already-linked') {
+            // If email/password is already linked, sign in with it
+            UserCredential userCredential = await _auth
+                .signInWithEmailAndPassword(email: email, password: password);
+            user = userCredential.user;
+          } else {
+            rethrow;
+          }
+        }
+      } else {
+        // No user signed in, try to sign up
+        try {
+          UserCredential userCredential = await _auth
+              .createUserWithEmailAndPassword(email: email, password: password);
+          user = userCredential.user;
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'email-already-in-use') {
+            // If email is already in use, sign in the user
+            UserCredential userCredential = await _auth
+                .signInWithEmailAndPassword(email: email, password: password);
+            user = userCredential.user;
+          } else {
+            rethrow;
+          }
+        }
+      }
+
+      if (user != null) {
+        // Add role in Firestore
+        await _firestoreService.addUserRole(user.uid, role);
+        return user;
+      }
+      return null;
+    } on FirebaseAuthException catch (e) {
+      throw Exception('Authentication failed: ${e.message}');
     } catch (e) {
-      throw Exception('Email Sign-Up failed: $e');
+      throw Exception('An unexpected error occurred: $e');
     }
   }
 
@@ -37,12 +75,15 @@ class AuthService {
     try {
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) return null;
+
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
+
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
+
       final result = await _auth.signInWithCredential(credential);
       return result.user;
     } catch (e) {
@@ -70,5 +111,10 @@ class AuthService {
     } catch (e) {
       throw Exception('Failed to link email credential: $e');
     }
+  }
+
+  // Sign out
+  Future<void> signOut() async {
+    await _auth.signOut();
   }
 }

@@ -7,7 +7,6 @@ import 'package:elabor/welcome_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../customer/customer_home_screen.dart';
 import '../../widgets/animated_button.dart';
 import '../../widgets/custom_text_field.dart';
 

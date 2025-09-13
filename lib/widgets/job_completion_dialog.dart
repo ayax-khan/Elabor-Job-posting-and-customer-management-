@@ -1,6 +1,6 @@
+import 'package:elabor/service/firestore_service.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../service/firestore_service.dart';
 
 class JobCompletionDialog extends StatefulWidget {
   final String jobId;
@@ -55,10 +55,7 @@ class _JobCompletionDialogState extends State<JobCompletionDialog> {
           _isLoading = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -67,9 +64,7 @@ class _JobCompletionDialogState extends State<JobCompletionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Row(
         children: [
           Container(
@@ -195,4 +190,3 @@ class _JobCompletionDialogState extends State<JobCompletionDialog> {
     );
   }
 }
-

@@ -1,8 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:elabor/service/firestore_service.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../service/firestore_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ChatScreen extends StatefulWidget {
   final String otherUserId;
@@ -96,6 +97,27 @@ class _ChatScreenState extends State<ChatScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error sending message: $e')));
+      }
+    }
+  }
+
+  Future<void> _makePhoneCall(String phoneNumber) async {
+    final Uri phoneUri = Uri(scheme: 'tel', path: phoneNumber);
+    try {
+      if (await canLaunchUrl(phoneUri)) {
+        await launchUrl(phoneUri);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not launch phone dialer')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error making phone call: $e')));
       }
     }
   }
@@ -214,6 +236,27 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ],
         ),
+        actions: [
+          FutureBuilder<Map<String, dynamic>?>(
+            future: _firestoreService.getUserDetails(widget.otherUserId),
+            builder: (context, snapshot) {
+              final userDetails = snapshot.data;
+              final phoneNumber =
+                  userDetails?['contactNumber'] ?? userDetails?['phoneNumber'];
+
+              return IconButton(
+                icon: const Icon(Icons.phone, color: Colors.blue),
+                onPressed:
+                    phoneNumber != null
+                        ? () {
+                          _makePhoneCall(phoneNumber);
+                        }
+                        : null,
+                tooltip: 'Call ${widget.otherUserName}',
+              );
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [

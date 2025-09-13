@@ -20,6 +20,7 @@ class LaborBasicInfoScreen extends StatefulWidget {
 class _LaborBasicInfoScreenState extends State<LaborBasicInfoScreen> {
   final _formKey = GlobalKey<FormState>();
   final _fullNameController = TextEditingController();
+  final _emailController = TextEditingController();
   final _cnicController = TextEditingController();
   final _contactController = TextEditingController();
   final _addressController = TextEditingController();
@@ -107,6 +108,7 @@ class _LaborBasicInfoScreenState extends State<LaborBasicInfoScreen> {
                     'city': _city!,
                     'area': _area!,
                     'password': _passwordController.text,
+                    'email': _emailController.text,
                   },
                 ),
           ),
@@ -168,6 +170,21 @@ class _LaborBasicInfoScreenState extends State<LaborBasicInfoScreen> {
                                   value!.isEmpty
                                       ? 'Please enter your name'
                                       : null,
+                        ),
+                        SizedBox(height: size.height * 0.02),
+                        CustomTextField(
+                          controller: _emailController,
+                          label: 'Email',
+                          keyboardType: TextInputType.emailAddress,
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please enter your email';
+                            }
+                            if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+").hasMatch(value)) {
+                              return 'Please enter a valid email address';
+                            }
+                            return null;
+                          },
                         ),
                         SizedBox(height: size.height * 0.02),
                         CustomTextField(

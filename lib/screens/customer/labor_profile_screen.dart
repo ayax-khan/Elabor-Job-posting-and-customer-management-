@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../models/labor.dart';
 import '../../service/firestore_service.dart';
 import 'chat_screen.dart';
@@ -7,10 +8,7 @@ import 'chat_screen.dart';
 class LaborProfileScreen extends StatefulWidget {
   final Labor labor;
 
-  const LaborProfileScreen({
-    super.key,
-    required this.labor,
-  });
+  const LaborProfileScreen({super.key, required this.labor});
 
   @override
   State<LaborProfileScreen> createState() => _LaborProfileScreenState();
@@ -29,7 +27,9 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
 
   Future<void> _fetchCompletedJobs() async {
     try {
-      final jobs = await _firestoreService.getCompletedJobsForLabor(widget.labor.uid);
+      final jobs = await _firestoreService.getCompletedJobsForLabor(
+        widget.labor.uid,
+      );
       setState(() {
         _completedJobs = jobs;
         _isLoading = false;
@@ -50,19 +50,41 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ChatScreen(
-          otherUserId: widget.labor.uid,
-          otherUserName: widget.labor.fullName,
-          otherUserProfilePicture: widget.labor.profilePhotoUrl,
-        ),
+        builder:
+            (context) => ChatScreen(
+              otherUserId: widget.labor.uid,
+              otherUserName: widget.labor.fullName,
+              otherUserProfilePicture: widget.labor.profilePhotoUrl,
+            ),
       ),
     );
+  }
+
+  Future<void> _makePhoneCall(String phoneNumber) async {
+    final Uri phoneUri = Uri(scheme: 'tel', path: phoneNumber);
+    try {
+      if (await canLaunchUrl(phoneUri)) {
+        await launchUrl(phoneUri);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not launch phone dialer')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error making phone call: $e')));
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -102,10 +124,7 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
                     height: size.width * 0.3,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.blue.shade200,
-                        width: 4,
-                      ),
+                      border: Border.all(color: Colors.blue.shade200, width: 4),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.grey.withOpacity(0.3),
@@ -118,20 +137,22 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
                     child: CircleAvatar(
                       radius: size.width * 0.15,
                       backgroundColor: Colors.grey[300],
-                      backgroundImage: widget.labor.profilePhotoUrl != null
-                          ? NetworkImage(widget.labor.profilePhotoUrl!)
-                          : null,
-                      child: widget.labor.profilePhotoUrl == null
-                          ? Icon(
-                              Icons.person,
-                              size: size.width * 0.12,
-                              color: Colors.grey[600],
-                            )
-                          : null,
+                      backgroundImage:
+                          widget.labor.profilePhotoUrl != null
+                              ? NetworkImage(widget.labor.profilePhotoUrl!)
+                              : null,
+                      child:
+                          widget.labor.profilePhotoUrl == null
+                              ? Icon(
+                                Icons.person,
+                                size: size.width * 0.12,
+                                color: Colors.grey[600],
+                              )
+                              : null,
                     ),
                   ),
                   SizedBox(height: size.height * 0.02),
-                  
+
                   // Labor Name
                   Text(
                     widget.labor.fullName,
@@ -143,39 +164,46 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
                     textAlign: TextAlign.center,
                   ),
                   SizedBox(height: size.height * 0.01),
-                  
+
                   // Mobile Number
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.phone,
-                          size: 18,
-                          color: Colors.blue.shade600,
+                  GestureDetector(
+                    onTap: () => _makePhoneCall(widget.labor.contactNumber),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.blue.shade200,
+                          width: 1,
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          widget.labor.contactNumber,
-                          style: GoogleFonts.poppins(
-                            fontSize: size.width * 0.04,
-                            color: Colors.blue.shade700,
-                            fontWeight: FontWeight.w500,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.phone,
+                            size: 18,
+                            color: Colors.blue.shade600,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          Text(
+                            widget.labor.contactNumber,
+                            style: GoogleFonts.poppins(
+                              fontSize: size.width * 0.04,
+                              color: Colors.blue.shade700,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   SizedBox(height: size.height * 0.03),
-                  
+
                   // Chat Button
                   SizedBox(
                     width: double.infinity,
@@ -211,9 +239,9 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
                 ],
               ),
             ),
-            
+
             SizedBox(height: size.height * 0.03),
-            
+
             // Skills Section
             Container(
               margin: EdgeInsets.symmetric(horizontal: size.width * 0.05),
@@ -245,37 +273,38 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: widget.labor.skills.map((skill) {
-                      return Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.shade50,
-                          borderRadius: BorderRadius.circular(15),
-                          border: Border.all(
-                            color: Colors.blue.shade200,
-                            width: 1,
-                          ),
-                        ),
-                        child: Text(
-                          skill,
-                          style: GoogleFonts.poppins(
-                            fontSize: size.width * 0.035,
-                            color: Colors.blue.shade700,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      );
-                    }).toList(),
+                    children:
+                        widget.labor.skills.map((skill) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(15),
+                              border: Border.all(
+                                color: Colors.blue.shade200,
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              skill,
+                              style: GoogleFonts.poppins(
+                                fontSize: size.width * 0.035,
+                                color: Colors.blue.shade700,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          );
+                        }).toList(),
                   ),
                 ],
               ),
             ),
-            
+
             SizedBox(height: size.height * 0.03),
-            
+
             // Completed Jobs Section
             Container(
               margin: EdgeInsets.symmetric(horizontal: size.width * 0.05),
@@ -314,7 +343,7 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
                     ],
                   ),
                   SizedBox(height: size.height * 0.02),
-                  
+
                   if (_isLoading)
                     const Center(
                       child: Padding(
@@ -358,7 +387,8 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: _completedJobs.length,
-                      separatorBuilder: (context, index) => const SizedBox(height: 12),
+                      separatorBuilder:
+                          (context, index) => const SizedBox(height: 12),
                       itemBuilder: (context, index) {
                         final job = _completedJobs[index];
                         return Container(
@@ -419,7 +449,7 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
                 ],
               ),
             ),
-            
+
             SizedBox(height: size.height * 0.05),
           ],
         ),
@@ -427,4 +457,3 @@ class _LaborProfileScreenState extends State<LaborProfileScreen> {
     );
   }
 }
-

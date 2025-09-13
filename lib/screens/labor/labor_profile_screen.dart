@@ -1,4 +1,3 @@
-import 'package:elabor/models/job.dart';
 import 'package:elabor/models/labor.dart';
 import 'package:elabor/service/firestore_service.dart';
 import 'package:flutter/material.dart';

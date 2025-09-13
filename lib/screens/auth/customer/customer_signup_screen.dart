@@ -1,4 +1,3 @@
-// import 'package:elabor/screens/customer/customer_home_screen.dart';
 import 'package:elabor/screens/customer/customer_main_screen.dart';
 import 'package:elabor/service/auth_service.dart';
 import 'package:elabor/service/cloudinary_service.dart';
@@ -21,6 +20,7 @@ class CustomerSignupScreen extends StatefulWidget {
 class _CustomerSignupScreenState extends State<CustomerSignupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
@@ -48,14 +48,13 @@ class _CustomerSignupScreenState extends State<CustomerSignupScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final user = await _authService.signInWithGoogle();
-      if (user != null) {
-        // Link Google account with email/password credential
-        await _authService.linkGoogleWithEmail(
-          user.email ?? '',
-          _passwordController.text,
-        );
+      final user = await _authService.registerUser(
+        _emailController.text.trim(),
+        _passwordController.text,
+        'customer',
+      );
 
+      if (user != null) {
         String? profileUrl =
             _profilePhoto != null
                 ? await CloudinaryService.uploadImage(_profilePhoto!)
@@ -116,6 +115,23 @@ class _CustomerSignupScreenState extends State<CustomerSignupScreen> {
                 label: 'Full Name',
                 validator:
                     (value) => value!.isEmpty ? 'Please enter your name' : null,
+              ),
+              SizedBox(height: size.height * 0.02),
+              CustomTextField(
+                controller: _emailController,
+                label: 'Email',
+                keyboardType: TextInputType.emailAddress,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter your email';
+                  }
+                  if (!RegExp(
+                    r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+",
+                  ).hasMatch(value)) {
+                    return 'Please enter a valid email address';
+                  }
+                  return null;
+                },
               ),
               SizedBox(height: size.height * 0.02),
               CustomTextField(

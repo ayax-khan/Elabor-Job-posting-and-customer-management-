@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../service/firestore_service.dart';
-import '../customer/chat_screen.dart';
 import 'job_management_screen.dart';
 
 class LaborNotificationScreen extends StatefulWidget {
